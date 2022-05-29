@@ -73,6 +73,9 @@ def one_or_none(result):
 
 @dataclass
 class Info:
+    '''
+    An info represents the system and package information at the time of recording.
+    '''
     kernel_version: str
     uptime: int
     pkgs: Dict[str, str]
@@ -81,27 +84,26 @@ class Info:
 @dataclass
 class Record:
     '''
-    Not in complete use yet. But will replace info_to_triples()
+    A record represents a full record of a trail.
     '''
-    node_id: URIRef
+    record_id: URIRef
     time: datetime
     info: Info
     message: str
 
-
-def info_to_triples(record_id: URIRef, info: Info) -> Iterable[T_ANY_TRIPLE]:
-    now = Literal(pdl.now())
-    yield (record_id, P_A, C_RECORD)
-    yield (record_id, P_TIME, now)
-    record_node = BNode()
-    yield (record_id, P_INFO, record_node)
-    yield (record_node, P_KERNEL_VER, Literal(info.kernel_version))
-    yield (record_node, P_UPTIME, Literal(info.uptime))
-    for pkg_name, pkg_version in info.pkgs.items():
-        pkg_node = BNode()
-        yield (pkg_node, P_NAME, Literal(pkg_name))
-        yield (pkg_node, P_VERSION, Literal(pkg_version))
-        yield (record_node, P_PKG, pkg_node)
+    def to_triples(self) -> Iterable[T_ANY_TRIPLE]:
+        yield (self.record_id, P_A, C_RECORD)
+        yield (self.record_id, P_TIME, Literal(self.time))
+        record_node = BNode()
+        yield (self.record_id, P_INFO, record_node)
+        yield (record_node, P_KERNEL_VER, Literal(self.info.kernel_version))
+        yield (record_node, P_UPTIME, Literal(self.info.uptime))
+        for pkg_name, pkg_version in self.info.pkgs.items():
+            pkg_node = BNode()
+            yield (pkg_node, P_NAME, Literal(pkg_name))
+            yield (pkg_node, P_VERSION, Literal(pkg_version))
+            yield (record_node, P_PKG, pkg_node)
+        yield (self.record_id, P_MSG, Literal(self.message))
 
 
 class Storage:
@@ -119,15 +121,12 @@ class Storage:
         if db_p.exists():
             self._g.parse(db_p)
 
-    def add_record(self, record: Info, msg: str = None) -> None:
+    def add_record(self, record: Record) -> None:
         '''
         TODO: deduplicate existing records
         '''
-        record_id = URIRef('urn:uuid:' + str(uuid4()))
-        for triple in info_to_triples(record_id, record):
+        for triple in record.to_triples():
             self._g.add(triple)
-        if msg:
-            self._g.add((record_id, P_MSG, Literal(msg)))
 
     def get_record(self, record_id: URIRef) -> Record:
         time = one(self._g.objects(record_id, P_TIME)).toPython()
@@ -141,7 +140,7 @@ class Storage:
             version = one(self._g.objects(pkg_node, P_VERSION)).toPython()
             pkgs[name] = version
         info = Info(kernel_version=kernel_ver, uptime=uptime, pkgs=pkgs)
-        record = Record(node_id=record_id,
+        record = Record(record_id=record_id,
                         time=time, info=info, message=message)
         return record
 
@@ -185,18 +184,21 @@ def get_pkg_versions() -> Dict[str, str]:
     return ret
 
 
-def get_record() -> Info:
-    return Info(get_kernel_version(), get_uptime(), get_pkg_versions())
+def get_record(msg: str) -> Record:
+    info = Info(get_kernel_version(), get_uptime(), get_pkg_versions())
+    record_id = URIRef('urn:uuid:' + str(uuid4()))
+    now = pdl.now()
+    return Record(record_id=record_id,
+                  time=now, info=info, message=msg)
 
 
-def add_new_record(msg: str = None):
+def add_new_record(msg: str):
     storage = Storage(STORAGE_LOCATION)
-    record = get_record()
-    storage.add_record(record, msg)
+    record = get_record(msg)
+    storage.add_record(record)
     storage.save()
 
 
 def list_records():
     storage = Storage(STORAGE_LOCATION)
     pprint(storage.list_records())
-
