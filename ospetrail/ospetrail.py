@@ -10,6 +10,7 @@ from rdflib.namespace import RDF
 from uuid import uuid4
 from typing import Dict, Iterable, List, Tuple, Union
 from dataclasses import dataclass
+from pprint import pprint
 
 import platform
 import uptime
@@ -54,6 +55,22 @@ P_VERSION = U('version')
 C_RECORD = U('Record')
 
 
+def one(result):
+    lst = list(result)
+    assert len(lst) == 1
+    return lst[0]
+
+
+def one_or_none(result):
+    lst = list(result)
+    if len(lst) == 0:
+        return None
+    elif len(lst) == 1:
+        return lst[0]
+    else:
+        assert len(lst) in {0, 1}
+
+
 @dataclass
 class Info:
     kernel_version: str
@@ -64,11 +81,12 @@ class Info:
 @dataclass
 class Record:
     '''
-    Not in use yet. But will replace info_to_triples()
+    Not in complete use yet. But will replace info_to_triples()
     '''
+    node_id: URIRef
     time: datetime
     info: Info
-    message: List[str]
+    message: str
 
 
 def info_to_triples(record_id: URIRef, info: Info) -> Iterable[T_ANY_TRIPLE]:
@@ -101,7 +119,7 @@ class Storage:
         if db_p.exists():
             self._g.parse(db_p)
 
-    def add_record(self, record: dict, msg: str = None) -> None:
+    def add_record(self, record: Info, msg: str = None) -> None:
         '''
         TODO: deduplicate existing records
         '''
@@ -110,6 +128,26 @@ class Storage:
             self._g.add(triple)
         if msg:
             self._g.add((record_id, P_MSG, Literal(msg)))
+
+    def get_record(self, record_id: URIRef) -> Record:
+        time = one(self._g.objects(record_id, P_TIME)).toPython()
+        message = one(self._g.objects(record_id, P_MSG)).toPython()
+        info_node = one(self._g.objects(record_id, P_INFO))
+        kernel_ver = one(self._g.objects(info_node, P_KERNEL_VER)).toPython()
+        uptime = one(self._g.objects(info_node, P_UPTIME)).toPython()
+        pkgs = {}
+        for pkg_node in self._g.objects(info_node, P_PKG):
+            name = one(self._g.objects(pkg_node, P_NAME)).toPython()
+            version = one(self._g.objects(pkg_node, P_VERSION)).toPython()
+            pkgs[name] = version
+        info = Info(kernel_version=kernel_ver, uptime=uptime, pkgs=pkgs)
+        record = Record(node_id=record_id,
+                        time=time, info=info, message=message)
+        return record
+
+    def list_records(self) -> List[Record]:
+        return [self.get_record(record_id)
+                for record_id in self._g.subjects(P_A, C_RECORD)]
 
     def save(self) -> None:
         db_p = Path(self._location) / DB_FILE
@@ -156,3 +194,9 @@ def add_new_record(msg: str = None):
     record = get_record()
     storage.add_record(record, msg)
     storage.save()
+
+
+def list_records():
+    storage = Storage(STORAGE_LOCATION)
+    pprint(storage.list_records())
+
