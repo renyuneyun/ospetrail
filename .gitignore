@@ -1,0 +1,9 @@
+__pycache__
+*.swp
+*.swo
+*~
+
+*.bak
+*.old
+bak/
+old/
